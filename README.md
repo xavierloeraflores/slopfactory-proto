@@ -2,6 +2,10 @@
 
 A small 2D factory game built with a portable Rust simulation, a headless CLI, and a Bevy 0.19 desktop frontend. The world is 64×64 tiles. Mine iron, copper, and stone; route items on conveyors; craft ten mechanical parts.
 
+![A running Tiny Factory miner, conveyor, and crafter line](docs/images/factory-demo.png)
+
+The game remains active after completing the [ten-part objective](docs/images/objective-complete.png).
+
 ## Build
 
 Install current stable Rust. On macOS, install Xcode command line tools. On Windows, install Visual Studio C++ build tools and Windows SDK. This repository was also tested on Windows with the GNU Rust target and the portable llvm-mingw toolchain. Then run:

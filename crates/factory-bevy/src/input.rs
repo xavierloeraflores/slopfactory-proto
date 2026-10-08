@@ -23,7 +23,7 @@ pub fn cursor(
     let over_ui = position.is_some_and(|cursor| {
         let width = window.resolution.width();
         let height = window.resolution.height();
-        (cursor.x < 340.0 && cursor.y < 235.0)
+        (cursor.x < 350.0 && cursor.y < 310.0)
             || (cursor.x > width - 380.0 && cursor.y < 440.0)
             || cursor.y > height - 145.0
     });

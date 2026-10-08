@@ -152,6 +152,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     } else {
         FactorySimulation::new(seed)
     };
+    let initial_status = if simulation.produced_parts() >= 10 {
+        "Objective complete! The factory keeps running."
+    } else {
+        "WASD to move. Right click a crafter, then E to interact."
+    };
     App::new()
         .add_plugins(
             DefaultPlugins
@@ -186,7 +191,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             cursor_over_ui: false,
             last_drag_tile: None,
             move_cooldown: 0.0,
-            status: "WASD to move. Right click a crafter, then E to interact.".into(),
+            status: initial_status.into(),
         })
         .init_resource::<presentation::RenderEntities>()
         .add_systems(Startup, presentation::setup)

@@ -98,6 +98,11 @@ pub fn update(game: Res<GameState>, mut texts: Query<(&mut Text, &TextKind)>) {
         "#".repeat(parts.min(10) as usize),
         ".".repeat(10usize.saturating_sub(parts as usize))
     );
+    let completion = if parts >= 10 {
+        "FACTORY GOAL COMPLETE\n"
+    } else {
+        ""
+    };
     let inventory = ALL_ITEMS
         .iter()
         .map(|item| {
@@ -110,7 +115,7 @@ pub fn update(game: Res<GameState>, mut texts: Query<(&mut Text, &TextKind)>) {
         .collect::<Vec<_>>()
         .join("\n");
     let hud = format!(
-        "TINY FACTORY  |  seed {}\nObjective: {parts}/10 parts {progress}\nTick {}  |  {}  |  {}x\nPlayer ({}, {})\n\nINVENTORY\n{}",
+        "TINY FACTORY  |  seed {}\nObjective: {parts}/10 parts {progress}\n{completion}Tick {}  |  {}  |  {}x\nPlayer ({}, {})\n\nINVENTORY\n{}",
         game.simulation.seed(),
         game.simulation.tick(),
         if game.paused { "PAUSED" } else { "RUNNING" },
