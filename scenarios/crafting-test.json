@@ -1,0 +1,22 @@
+{
+  "name": "Automated crafting: ore delivery, plate production, and export",
+  "seed": 42,
+  "steps": [
+    {"type":"debug_player","position":{"x":34,"y":32}},
+    {"type":"command","command":{"type":"build","kind":"miner","position":{"x":35,"y":31},"direction":"north"}},
+    {"type":"command","command":{"type":"build","kind":"conveyor","position":{"x":35,"y":32},"direction":"north"}},
+    {"type":"command","command":{"type":"build","kind":"conveyor","position":{"x":35,"y":33},"direction":"north"}},
+    {"type":"debug_player","position":{"x":34,"y":33}},
+    {"type":"command","command":{"type":"build","kind":"crafter","position":{"x":35,"y":34},"direction":"east"}},
+    {"type":"debug_player","position":{"x":36,"y":33}},
+    {"type":"command","command":{"type":"build","kind":"conveyor","position":{"x":36,"y":34},"direction":"east"}},
+    {"type":"debug_player","position":{"x":34,"y":33}},
+    {"type":"command","command":{"type":"configure","structure_id":4,"recipe":"iron_plate"}},
+    {"type":"capture_materials"},
+    {"type":"step","ticks":1000},
+    {"type":"assert","assertion":{"type":"structure","position":{"x":35,"y":34},"kind":"crafter","output_item":"iron_plate","output_at_least":1}},
+    {"type":"assert","assertion":{"type":"structure","position":{"x":36,"y":34},"kind":"conveyor","belt_item":"iron_plate"}},
+    {"type":"assert","assertion":{"type":"materials_unchanged"}},
+    {"type":"assert","assertion":{"type":"tick","equals":1000}}
+  ]
+}

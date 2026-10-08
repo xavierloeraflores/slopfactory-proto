@@ -4,9 +4,9 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use factory_protocol::{
     CHUNK_SIZE, Direction, FORMAT_VERSION, GameCommand, GameEvent, GameSnapshot, Item, ItemStack,
-    OBJECTIVE_PARTS, PlayerSnapshot, Pos, Recipe, RenderSnapshot, ResourceId, ResourceKind,
-    ResourceSnapshot, StructureId, StructureKind, StructureSnapshot, Terrain, TileSnapshot,
-    TransferRoute, WORLD_SIZE,
+    MaterialTotals, OBJECTIVE_PARTS, PlayerSnapshot, Pos, Recipe, RenderSnapshot, ResourceId,
+    ResourceKind, ResourceSnapshot, StructureId, StructureKind, StructureSnapshot, Terrain,
+    TileSnapshot, TransferRoute, WORLD_SIZE,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -146,6 +146,49 @@ impl FactorySimulation {
     }
     pub fn produced_parts(&self) -> u32 {
         self.mechanical_parts_produced
+    }
+
+    pub fn material_totals(&self) -> MaterialTotals {
+        let mut totals = MaterialTotals::default();
+        for node in self.resources.values() {
+            totals.add_resource(node.kind, node.quantity as u64);
+        }
+        for (item, count) in &self.player.inventory {
+            totals.add_item(*item, *count as u64);
+        }
+        for structure in self.structures.values() {
+            match &structure.state {
+                StructureState::Miner {
+                    output,
+                    resource_id,
+                    ..
+                } => {
+                    if let Some(node) = self.resources.get(resource_id) {
+                        totals.add_item(node.kind.item(), *output as u64);
+                    }
+                }
+                StructureState::Conveyor { item: Some(item) } => totals.add_item(*item, 1),
+                StructureState::Conveyor { item: None } => {}
+                StructureState::Crafter {
+                    recipe,
+                    progress,
+                    input,
+                    output,
+                } => {
+                    for (item, count) in input.iter().chain(output) {
+                        totals.add_item(*item, *count as u64);
+                    }
+                    if *progress > 0
+                        && let Some(recipe) = recipe
+                    {
+                        for (item, count) in recipe_inputs(*recipe) {
+                            totals.add_item(*item, *count as u64);
+                        }
+                    }
+                }
+            }
+        }
+        totals
     }
 
     pub fn new(seed: u64) -> Self {
@@ -498,6 +541,13 @@ impl FactorySimulation {
             return Err(GameError::NotCrafter);
         };
         if *progress > 0 {
+            let reserved: u32 = recipe_inputs(selected.expect("active recipe"))
+                .iter()
+                .map(|(_, count)| count)
+                .sum();
+            if inventory_total(input) + reserved > 24 {
+                return Err(GameError::CapacityExceeded);
+            }
             for (item, count) in recipe_inputs(selected.expect("active recipe")) {
                 *input.entry(*item).or_default() += count;
             }
@@ -919,10 +969,59 @@ impl FactorySimulation {
         if self.chunks.len() != 16 || self.chunks.iter().any(|chunk| chunk.tiles.len() != 256) {
             return Err(GameError::InvalidSave("chunk topology is invalid".into()));
         }
-        if self.tile(self.player.position).is_none() {
-            return Err(GameError::InvalidSave("player is outside the world".into()));
+        for (index, chunk) in self.chunks.iter().enumerate() {
+            let expected = Pos::new(
+                (index as i32 % 4) * CHUNK_SIZE,
+                (index as i32 / 4) * CHUNK_SIZE,
+            );
+            if chunk.origin != expected {
+                return Err(GameError::InvalidSave(
+                    "chunk origin/order is invalid".into(),
+                ));
+            }
         }
-        for node in self.resources.values() {
+        if !self
+            .tile(self.player.position)
+            .is_some_and(|tile| tile.terrain.passable() && tile.structure_id.is_none())
+        {
+            return Err(GameError::InvalidSave(
+                "player position is blocked or outside the world".into(),
+            ));
+        }
+        for y in 0..WORLD_SIZE {
+            for x in 0..WORLD_SIZE {
+                let pos = Pos::new(x, y);
+                let tile = self.tile(pos).expect("chunk topology checked");
+                if let Some(id) = tile.resource_id
+                    && self
+                        .resources
+                        .get(&id)
+                        .is_none_or(|node| node.position != pos)
+                {
+                    return Err(GameError::InvalidSave(format!(
+                        "tile ({x}, {y}) has invalid resource reference"
+                    )));
+                }
+                if let Some(id) = tile.structure_id
+                    && (self
+                        .structures
+                        .get(&id)
+                        .is_none_or(|structure| structure.position != pos)
+                        || !tile.terrain.passable())
+                {
+                    return Err(GameError::InvalidSave(format!(
+                        "tile ({x}, {y}) has invalid structure reference"
+                    )));
+                }
+            }
+        }
+        for (key, node) in &self.resources {
+            if *key != node.id {
+                return Err(GameError::InvalidSave(format!(
+                    "resource key {} disagrees with ID {}",
+                    key, node.id
+                )));
+            }
             if self.tile(node.position).and_then(|tile| tile.resource_id) != Some(node.id) {
                 return Err(GameError::InvalidSave(format!(
                     "resource {} has broken tile reference",
@@ -930,7 +1029,13 @@ impl FactorySimulation {
                 )));
             }
         }
-        for structure in self.structures.values() {
+        for (key, structure) in &self.structures {
+            if *key != structure.id {
+                return Err(GameError::InvalidSave(format!(
+                    "structure key {} disagrees with ID {}",
+                    key, structure.id
+                )));
+            }
             if self
                 .tile(structure.position)
                 .and_then(|tile| tile.structure_id)
@@ -941,6 +1046,60 @@ impl FactorySimulation {
                     structure.id
                 )));
             }
+            match &structure.state {
+                StructureState::Miner {
+                    progress,
+                    output,
+                    resource_id,
+                } => {
+                    let node = self.resources.get(resource_id).ok_or_else(|| {
+                        GameError::InvalidSave(format!("miner {} lacks resource", key))
+                    })?;
+                    if node.position != structure.position
+                        || !node.kind.mineable()
+                        || *progress >= 60
+                        || *output > MINER_BUFFER_CAPACITY
+                    {
+                        return Err(GameError::InvalidSave(format!(
+                            "miner {} has invalid state",
+                            key
+                        )));
+                    }
+                }
+                StructureState::Conveyor { .. } => {}
+                StructureState::Crafter {
+                    recipe,
+                    progress,
+                    input,
+                    output,
+                } => {
+                    if inventory_total(input) > 24
+                        || inventory_total(output) > CRAFTER_OUTPUT_CAPACITY
+                        || recipe.is_none() && *progress != 0
+                        || recipe.is_some_and(|recipe| *progress > recipe_time(recipe))
+                    {
+                        return Err(GameError::InvalidSave(format!(
+                            "crafter {} has invalid state",
+                            key
+                        )));
+                    }
+                }
+            }
+        }
+        if self
+            .resources
+            .keys()
+            .next_back()
+            .is_some_and(|max| self.next_resource_id <= *max)
+            || self
+                .structures
+                .keys()
+                .next_back()
+                .is_some_and(|max| self.next_structure_id <= *max)
+        {
+            return Err(GameError::InvalidSave(
+                "next entity ID is not monotonic".into(),
+            ));
         }
         Ok(())
     }
@@ -960,6 +1119,14 @@ pub struct DebugWorld<'a> {
 #[cfg(any(test, feature = "debug-api"))]
 impl DebugWorld<'_> {
     pub fn set_terrain(&mut self, pos: Pos, terrain: Terrain) -> Result<(), GameError> {
+        let tile = self.simulation.tile(pos).ok_or(GameError::OutOfBounds)?;
+        if !terrain.passable()
+            && (tile.structure_id.is_some()
+                || pos == self.simulation.player.position
+                || tile.resource_id.is_some())
+        {
+            return Err(GameError::Occupied);
+        }
         self.simulation
             .tile_mut(pos)
             .ok_or(GameError::OutOfBounds)?
@@ -1263,5 +1430,82 @@ mod tests {
         let loaded = FactorySimulation::from_json(&json).unwrap();
         assert_eq!(simulation, loaded);
         assert_eq!(simulation.state_hash(), loaded.state_hash());
+    }
+
+    #[test]
+    fn format_one_serialization_contract_is_stable() {
+        let simulation = FactorySimulation::new(42);
+        assert_eq!(simulation.format_version, 1);
+        assert_eq!(
+            simulation.state_hash(),
+            "471fc7420dc39251cd9a846ec503610b942f602d2411fa9419581ec3f0e1e979"
+        );
+        let value: serde_json::Value =
+            serde_json::from_str(&simulation.to_json().unwrap()).unwrap();
+        assert_eq!(value["player"]["inventory"]["iron_ore"], 12);
+        assert_eq!(
+            value["chunks"][0]["origin"],
+            serde_json::json!({"x": 0, "y": 0})
+        );
+    }
+
+    #[test]
+    fn miner_stops_at_depleted_deposit() {
+        let mut simulation = FactorySimulation::new(42);
+        let pos = Pos::new(34, 32);
+        let node = simulation
+            .debug()
+            .set_resource(pos, ResourceKind::Iron, 1)
+            .unwrap();
+        let miner = simulation
+            .execute(GameCommand::Build {
+                kind: StructureKind::Miner,
+                position: pos,
+                direction: Direction::East,
+            })
+            .unwrap();
+        assert!(matches!(miner[0], GameEvent::Built { .. }));
+        simulation.step_many(600);
+        assert_eq!(simulation.resource_quantity(node), Some(0));
+        assert_eq!(
+            simulation.structures.values().next().unwrap().state,
+            StructureState::Miner {
+                progress: 0,
+                output: 1,
+                resource_id: node
+            }
+        );
+        simulation.validate().unwrap();
+    }
+
+    #[test]
+    fn placement_rejects_blocked_terrain_and_missing_cost_without_mutation() {
+        let mut simulation = FactorySimulation::new(42);
+        let blocked = Pos::new(33, 32);
+        simulation
+            .debug()
+            .set_terrain(blocked, Terrain::Water)
+            .unwrap();
+        let before = simulation.state_hash();
+        assert_eq!(
+            simulation.execute(GameCommand::Build {
+                kind: StructureKind::Conveyor,
+                position: blocked,
+                direction: Direction::East
+            }),
+            Err(GameError::BlockedTerrain)
+        );
+        assert_eq!(simulation.state_hash(), before);
+        simulation.player.inventory.insert(Item::Stone, 0);
+        let before = simulation.state_hash();
+        assert_eq!(
+            simulation.execute(GameCommand::Build {
+                kind: StructureKind::Conveyor,
+                position: Pos::new(32, 33),
+                direction: Direction::North
+            }),
+            Err(GameError::InsufficientMaterials)
+        );
+        assert_eq!(simulation.state_hash(), before);
     }
 }

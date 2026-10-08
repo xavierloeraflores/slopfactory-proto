@@ -1,0 +1,20 @@
+{
+  "name": "Starting world: accessible deposits and manual harvesting",
+  "seed": 42,
+  "steps": [
+    {"type":"assert","assertion":{"type":"inventory","item":"stone","equals":20}},
+    {"type":"assert","assertion":{"type":"inventory","item":"iron_ore","equals":12}},
+    {"type":"assert","assertion":{"type":"inventory","item":"wood","equals":5}},
+    {"type":"assert","assertion":{"type":"player_position","position":{"x":32,"y":32}}},
+    {"type":"assert","assertion":{"type":"resource","position":{"x":35,"y":31},"kind":"iron","quantity_equals":120}},
+    {"type":"assert","assertion":{"type":"reachable","position":{"x":35,"y":31}}},
+    {"type":"assert","assertion":{"type":"reachable","position":{"x":29,"y":34}}},
+    {"type":"assert","assertion":{"type":"reachable","position":{"x":32,"y":36}}},
+    {"type":"assert","assertion":{"type":"reachable","position":{"x":30,"y":30}}},
+    {"type":"command","command":{"type":"move","direction":"east"}},
+    {"type":"command","command":{"type":"harvest","position":{"x":35,"y":31}}},
+    {"type":"assert","assertion":{"type":"inventory","item":"iron_ore","equals":13}},
+    {"type":"assert","assertion":{"type":"resource","position":{"x":35,"y":31},"kind":"iron","quantity_equals":119}},
+    {"type":"assert","assertion":{"type":"tick","equals":0}}
+  ]
+}

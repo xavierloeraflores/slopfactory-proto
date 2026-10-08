@@ -1,0 +1,29 @@
+{
+  "name": "Automated mining: belt travel, buffering, and backpressure",
+  "seed": 42,
+  "steps": [
+    {"type":"debug_resource","position":{"x":34,"y":32},"kind":"iron","quantity":10},
+    {"type":"debug_player","position":{"x":33,"y":31}},
+    {"type":"command","command":{"type":"build","kind":"miner","position":{"x":34,"y":32},"direction":"east"}},
+    {"type":"command","command":{"type":"build","kind":"conveyor","position":{"x":35,"y":32},"direction":"east"}},
+    {"type":"debug_player","position":{"x":35,"y":31}},
+    {"type":"command","command":{"type":"build","kind":"conveyor","position":{"x":36,"y":32},"direction":"east"}},
+    {"type":"command","command":{"type":"build","kind":"conveyor","position":{"x":37,"y":32},"direction":"east"}},
+    {"type":"capture_materials"},
+    {"type":"step","ticks":59},
+    {"type":"assert","assertion":{"type":"resource","position":{"x":34,"y":32},"kind":"iron","quantity_equals":10}},
+    {"type":"step","ticks":1},
+    {"type":"assert","assertion":{"type":"structure","position":{"x":35,"y":32},"kind":"conveyor","belt_item":"iron_ore"}},
+    {"type":"step","ticks":5},
+    {"type":"assert","assertion":{"type":"structure","position":{"x":36,"y":32},"kind":"conveyor","belt_item":"iron_ore"}},
+    {"type":"step","ticks":5},
+    {"type":"assert","assertion":{"type":"structure","position":{"x":37,"y":32},"kind":"conveyor","belt_item":"iron_ore"}},
+    {"type":"step","ticks":500},
+    {"type":"assert","assertion":{"type":"structure","position":{"x":34,"y":32},"kind":"miner","output_item":"iron_ore","output_at_least":4}},
+    {"type":"assert","assertion":{"type":"structure","position":{"x":35,"y":32},"kind":"conveyor","belt_item":"iron_ore"}},
+    {"type":"assert","assertion":{"type":"structure","position":{"x":36,"y":32},"kind":"conveyor","belt_item":"iron_ore"}},
+    {"type":"assert","assertion":{"type":"structure","position":{"x":37,"y":32},"kind":"conveyor","belt_item":"iron_ore"}},
+    {"type":"assert","assertion":{"type":"resource","position":{"x":34,"y":32},"kind":"iron","quantity_equals":3}},
+    {"type":"assert","assertion":{"type":"materials_unchanged"}}
+  ]
+}

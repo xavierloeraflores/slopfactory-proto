@@ -268,6 +268,42 @@ pub struct PlayerSnapshot {
     pub inventory: Vec<ItemStack>,
 }
 
+/// Raw-material equivalents currently present in the world and inventories.
+/// Construction is a deliberate sink, so compare these totals after placement.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MaterialTotals {
+    pub iron: u64,
+    pub copper: u64,
+    pub stone: u64,
+    pub wood: u64,
+}
+
+impl MaterialTotals {
+    pub fn add_resource(&mut self, kind: ResourceKind, count: u64) {
+        match kind {
+            ResourceKind::Iron => self.iron += count,
+            ResourceKind::Copper => self.copper += count,
+            ResourceKind::Stone => self.stone += count,
+            ResourceKind::Tree => self.wood += count,
+        }
+    }
+
+    pub fn add_item(&mut self, item: Item, count: u64) {
+        match item {
+            Item::IronOre => self.iron += count,
+            Item::CopperOre => self.copper += count,
+            Item::Stone => self.stone += count,
+            Item::Wood => self.wood += count,
+            Item::IronPlate => self.iron += count * 2,
+            Item::CopperPlate => self.copper += count * 2,
+            Item::MechanicalPart => {
+                self.iron += count * 4;
+                self.wood += count;
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GameSnapshot {
     pub format_version: u32,

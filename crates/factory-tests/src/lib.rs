@@ -289,6 +289,7 @@ mod scenarios {
         .unwrap();
         sim.debug().grant(Item::IronPlate, 20);
         sim.debug().grant(Item::Wood, 5);
+        let materials_before = sim.material_totals();
         let mut completions = 0;
         for batch in [4, 4, 2] {
             for (item, count) in [(Item::IronPlate, 2 * batch), (Item::Wood, batch)] {
@@ -314,6 +315,7 @@ mod scenarios {
             .unwrap();
         }
         assert_eq!(sim.produced_parts(), 10);
+        assert_eq!(sim.material_totals(), materials_before);
         assert_eq!(completions, 1);
         assert!(sim.snapshot().objective_complete);
         sim.step();
@@ -365,7 +367,9 @@ mod scenarios {
             recipe: Recipe::IronPlate,
         })
         .unwrap();
+        let materials_before = sim.material_totals();
         sim.step_many(1000);
+        assert_eq!(sim.material_totals(), materials_before);
         let state = sim.snapshot();
         let get = |id| state.structures.iter().find(|s| s.id == id).unwrap();
         let ore_in_miner = get(miner)
