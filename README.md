@@ -38,4 +38,6 @@ cargo run -p factory-cli --bin factoryctl -- scenario --file scenarios/crafting-
 
 The CLI executable is named `factoryctl`. See [docs/cli.md](docs/cli.md) for all commands and scenario semantics. [AGENTS.md](AGENTS.md) has the verification workflow; [docs/architecture.md](docs/architecture.md) describes the engine boundary.
 
+[Verification results](docs/verification.md) record the workspace gates, CLI scenarios, and live game checks.
+
 For a deterministic screenshot without a graphics window, install a current Node.js and run `node tools/render_preview.mjs world.json preview.png 32 32`. This renders the saved scene from the same sprites the frontend uses; it is a headless preview, while the running game adds UI, camera movement, and animation.
