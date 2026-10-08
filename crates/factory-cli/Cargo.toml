@@ -9,7 +9,7 @@ name = "factoryctl"
 path = "src/main.rs"
 
 [dependencies]
-factory-core.workspace = true
+factory-core = { workspace = true, features = ["debug-api"] }
 factory-protocol.workspace = true
 clap.workspace = true
 serde.workspace = true

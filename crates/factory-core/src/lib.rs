@@ -1,6 +1,6 @@
 //! Canonical, deterministic Tiny Factory simulation. No graphics engine is used here.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use factory_protocol::{
     CHUNK_SIZE, Direction, FORMAT_VERSION, GameCommand, GameEvent, GameSnapshot, Item, ItemStack,
@@ -113,19 +113,41 @@ pub struct Player {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FactorySimulation {
-    pub format_version: u32,
-    pub seed: u64,
-    pub tick: u64,
-    pub chunks: Vec<Chunk>,
-    pub resources: BTreeMap<ResourceId, ResourceNode>,
-    pub structures: BTreeMap<StructureId, Structure>,
-    pub player: Player,
-    pub mechanical_parts_produced: u32,
-    pub next_resource_id: ResourceId,
-    pub next_structure_id: StructureId,
+    format_version: u32,
+    seed: u64,
+    tick: u64,
+    chunks: Vec<Chunk>,
+    resources: BTreeMap<ResourceId, ResourceNode>,
+    structures: BTreeMap<StructureId, Structure>,
+    player: Player,
+    mechanical_parts_produced: u32,
+    next_resource_id: ResourceId,
+    next_structure_id: StructureId,
 }
 
 impl FactorySimulation {
+    pub const fn tick(&self) -> u64 {
+        self.tick
+    }
+    pub const fn seed(&self) -> u64 {
+        self.seed
+    }
+    pub fn player_position(&self) -> Pos {
+        self.player.position
+    }
+    pub fn inventory_count(&self, item: Item) -> u32 {
+        self.player.inventory.get(&item).copied().unwrap_or(0)
+    }
+    pub fn resource_quantity(&self, id: ResourceId) -> Option<u32> {
+        self.resources.get(&id).map(|resource| resource.quantity)
+    }
+    pub fn structure(&self, id: StructureId) -> Option<&Structure> {
+        self.structures.get(&id)
+    }
+    pub fn produced_parts(&self) -> u32 {
+        self.mechanical_parts_produced
+    }
+
     pub fn new(seed: u64) -> Self {
         let mut chunks = Vec::with_capacity(16);
         for cy in 0..4 {
@@ -178,10 +200,12 @@ impl FactorySimulation {
             simulation.add_resource(pos, kind, quantity);
         }
         // Additional deposits diversify the map without making the start dependent on chance.
+        let reachable = simulation.reachable_tiles();
         for y in 1..WORLD_SIZE - 1 {
             for x in 1..WORLD_SIZE - 1 {
                 let pos = Pos::new(x, y);
                 if pos.manhattan(simulation.player.position) < 12
+                    || !reachable.contains(&pos)
                     || !simulation
                         .tile(pos)
                         .is_some_and(|tile| tile.terrain.passable() && tile.resource_id.is_none())
@@ -238,6 +262,30 @@ impl FactorySimulation {
         self.tile(pos)?
             .resource_id
             .and_then(|id| self.resources.get(&id))
+    }
+
+    pub fn reachable_tiles(&self) -> BTreeSet<Pos> {
+        let mut visited = BTreeSet::from([self.player.position]);
+        let mut queue = VecDeque::from([self.player.position]);
+        while let Some(pos) = queue.pop_front() {
+            for direction in [
+                Direction::North,
+                Direction::East,
+                Direction::South,
+                Direction::West,
+            ] {
+                let neighbor = direction.apply(pos);
+                if !visited.contains(&neighbor)
+                    && self
+                        .tile(neighbor)
+                        .is_some_and(|tile| tile.terrain.passable())
+                {
+                    visited.insert(neighbor);
+                    queue.push_back(neighbor);
+                }
+            }
+        }
+        visited
     }
 
     pub fn structure_at(&self, pos: Pos) -> Option<&Structure> {
@@ -667,16 +715,27 @@ impl FactorySimulation {
     }
 
     /// Controlled scenario setup, intentionally separate from gameplay commands.
+    #[cfg(any(test, feature = "debug-api"))]
     pub fn debug(&mut self) -> DebugWorld<'_> {
         DebugWorld { simulation: self }
     }
 }
 
+#[cfg(any(test, feature = "debug-api"))]
 pub struct DebugWorld<'a> {
     simulation: &'a mut FactorySimulation,
 }
 
+#[cfg(any(test, feature = "debug-api"))]
 impl DebugWorld<'_> {
+    pub fn set_terrain(&mut self, pos: Pos, terrain: Terrain) -> Result<(), GameError> {
+        self.simulation
+            .tile_mut(pos)
+            .ok_or(GameError::OutOfBounds)?
+            .terrain = terrain;
+        Ok(())
+    }
+
     pub fn grant(&mut self, item: Item, count: u32) {
         *self.simulation.player.inventory.entry(item).or_default() += count;
     }
@@ -838,4 +897,127 @@ fn coord_hash(seed: u64, x: i32, y: i32) -> u64 {
     value ^= value >> 27;
     value = value.wrapping_mul(0x94d0_49bb_1331_11eb);
     value ^ (value >> 31)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn seeded_generation_is_reproducible_and_has_nearby_resources() {
+        let first = FactorySimulation::new(42);
+        let second = FactorySimulation::new(42);
+        assert_eq!(first.state_hash(), second.state_hash());
+        assert_ne!(first.state_hash(), FactorySimulation::new(43).state_hash());
+        assert_eq!(first.chunks.len(), 16);
+        assert!(first.chunks.iter().all(|chunk| chunk.tiles.len() == 256));
+        let reachable = first.reachable_tiles();
+        assert!(
+            first
+                .resources
+                .values()
+                .all(|node| reachable.contains(&node.position))
+        );
+        for kind in [
+            ResourceKind::Iron,
+            ResourceKind::Copper,
+            ResourceKind::Stone,
+            ResourceKind::Tree,
+        ] {
+            assert!(first.resources.values().any(|node| {
+                node.kind == kind
+                    && node.quantity > 0
+                    && node.position.manhattan(first.player.position) <= 6
+                    && first
+                        .tile(node.position)
+                        .is_some_and(|tile| tile.terrain.passable())
+            }));
+        }
+        assert_eq!(first.inventory_count(Item::Stone), 20);
+        assert_eq!(first.inventory_count(Item::IronOre), 12);
+        assert_eq!(first.inventory_count(Item::Wood), 5);
+    }
+
+    #[test]
+    fn harvesting_respects_range_and_depletion() {
+        let mut simulation = FactorySimulation::new(42);
+        let position = Pos::new(34, 32);
+        let id = simulation
+            .debug()
+            .set_resource(position, ResourceKind::Iron, 2)
+            .unwrap();
+        let before = simulation.inventory_count(Item::IronOre);
+        for remaining in [1, 0] {
+            let events = simulation
+                .execute(GameCommand::Harvest { position })
+                .unwrap();
+            assert_eq!(
+                events,
+                vec![GameEvent::Harvested {
+                    resource_id: id,
+                    item: Item::IronOre,
+                    remaining
+                }]
+            );
+        }
+        assert_eq!(simulation.inventory_count(Item::IronOre), before + 2);
+        assert_eq!(simulation.resource_quantity(id), Some(0));
+        assert_eq!(
+            simulation.execute(GameCommand::Harvest { position }),
+            Err(GameError::Depleted)
+        );
+        assert_eq!(
+            simulation.execute(GameCommand::Harvest {
+                position: Pos::new(3, 3)
+            }),
+            Err(GameError::OutOfRange)
+        );
+    }
+
+    #[test]
+    fn movement_checks_terrain_and_world_edges() {
+        let mut simulation = FactorySimulation::new(42);
+        assert_eq!(
+            simulation
+                .execute(GameCommand::Move {
+                    direction: Direction::East
+                })
+                .unwrap(),
+            vec![GameEvent::PlayerMoved {
+                position: Pos::new(33, 32)
+            }]
+        );
+        simulation
+            .debug()
+            .set_terrain(Pos::new(0, 0), Terrain::Grass)
+            .unwrap();
+        simulation
+            .debug()
+            .set_player_position(Pos::new(0, 0))
+            .unwrap();
+        assert_eq!(
+            simulation.execute(GameCommand::Move {
+                direction: Direction::West
+            }),
+            Err(GameError::OutOfBounds)
+        );
+    }
+
+    #[test]
+    fn json_round_trip_preserves_hash() {
+        let mut simulation = FactorySimulation::new(7);
+        simulation
+            .debug()
+            .set_player_position(Pos::new(31, 31))
+            .unwrap();
+        simulation
+            .execute(GameCommand::Harvest {
+                position: Pos::new(30, 30),
+            })
+            .unwrap();
+        let json = simulation.to_json().unwrap();
+        let loaded = FactorySimulation::from_json(&json).unwrap();
+        assert_eq!(simulation, loaded);
+        assert_eq!(simulation.state_hash(), loaded.state_hash());
+    }
 }
