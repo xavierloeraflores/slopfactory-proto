@@ -412,12 +412,7 @@ impl FactorySimulation {
         }])
     }
 
-    fn build(
-        &mut self,
-        kind: StructureKind,
-        position: Pos,
-        direction: Direction,
-    ) -> Result<Vec<GameEvent>, GameError> {
+    pub fn can_build(&self, kind: StructureKind, position: Pos) -> Result<(), GameError> {
         self.in_range(position)?;
         let tile = self.tile(position).ok_or(GameError::OutOfBounds)?;
         if !tile.terrain.passable() {
@@ -429,7 +424,7 @@ impl FactorySimulation {
         if position == self.player.position {
             return Err(GameError::Occupied);
         }
-        let resource_id = match kind {
+        match kind {
             StructureKind::Miner => {
                 let id = tile.resource_id.ok_or(GameError::NoResource)?;
                 let node = self.resources.get(&id).ok_or(GameError::NoResource)?;
@@ -439,20 +434,29 @@ impl FactorySimulation {
                 if node.quantity == 0 {
                     return Err(GameError::Depleted);
                 }
-                Some(id)
             }
             _ => {
                 if tile.resource_id.is_some() {
                     return Err(GameError::Occupied);
                 }
-                None
             }
-        };
+        }
         for (item, count) in construction_cost(kind) {
             if self.player.inventory.get(item).copied().unwrap_or(0) < *count {
                 return Err(GameError::InsufficientMaterials);
             }
         }
+        Ok(())
+    }
+
+    fn build(
+        &mut self,
+        kind: StructureKind,
+        position: Pos,
+        direction: Direction,
+    ) -> Result<Vec<GameEvent>, GameError> {
+        self.can_build(kind, position)?;
+        let resource_id = self.tile(position).and_then(|tile| tile.resource_id);
         let id = self.next_structure_id;
         self.next_structure_id += 1;
         let state = match kind {

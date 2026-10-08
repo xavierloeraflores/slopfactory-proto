@@ -461,4 +461,214 @@ mod scenarios {
             1
         );
     }
+
+    #[test]
+    fn ordinary_play_can_build_a_line_and_produce_ten_parts() {
+        let mut sim = FactorySimulation::new(42);
+        let walk = |world: &mut FactorySimulation, direction| {
+            world.execute(GameCommand::Move { direction }).unwrap();
+        };
+        walk(&mut sim, Direction::East);
+        sim.execute(GameCommand::Build {
+            kind: StructureKind::Miner,
+            position: Pos::new(35, 31),
+            direction: Direction::North,
+        })
+        .unwrap();
+        for position in [Pos::new(35, 32), Pos::new(35, 33)] {
+            sim.execute(GameCommand::Build {
+                kind: StructureKind::Conveyor,
+                position,
+                direction: Direction::North,
+            })
+            .unwrap();
+        }
+        walk(&mut sim, Direction::North);
+        let plates = match sim
+            .execute(GameCommand::Build {
+                kind: StructureKind::Crafter,
+                position: Pos::new(35, 34),
+                direction: Direction::East,
+            })
+            .unwrap()[0]
+        {
+            GameEvent::Built { structure_id, .. } => structure_id,
+            _ => unreachable!(),
+        };
+        walk(&mut sim, Direction::East);
+        sim.execute(GameCommand::Build {
+            kind: StructureKind::Conveyor,
+            position: Pos::new(36, 34),
+            direction: Direction::East,
+        })
+        .unwrap();
+        walk(&mut sim, Direction::North);
+        let parts = match sim
+            .execute(GameCommand::Build {
+                kind: StructureKind::Crafter,
+                position: Pos::new(37, 34),
+                direction: Direction::East,
+            })
+            .unwrap()[0]
+        {
+            GameEvent::Built { structure_id, .. } => structure_id,
+            _ => unreachable!(),
+        };
+        for (structure_id, recipe) in [(plates, Recipe::IronPlate), (parts, Recipe::MechanicalPart)]
+        {
+            sim.execute(GameCommand::Configure {
+                structure_id,
+                recipe,
+            })
+            .unwrap();
+        }
+        assert_eq!(sim.inventory_count(Item::Stone), 1);
+        assert_eq!(sim.inventory_count(Item::IronOre), 2);
+        let materials_after_build = sim.material_totals();
+
+        for _ in 0..4 {
+            walk(&mut sim, Direction::West);
+        }
+        walk(&mut sim, Direction::South);
+        for _ in 0..5 {
+            sim.execute(GameCommand::Harvest {
+                position: Pos::new(30, 30),
+            })
+            .unwrap();
+        }
+        assert_eq!(sim.inventory_count(Item::Wood), 10);
+        for _ in 0..4 {
+            walk(&mut sim, Direction::East);
+        }
+        walk(&mut sim, Direction::North);
+        sim.execute(GameCommand::Transfer {
+            structure_id: parts,
+            route: TransferRoute::PlayerToInput,
+            item: Item::Wood,
+            count: 10,
+        })
+        .unwrap();
+        assert_eq!(sim.material_totals(), materials_after_build);
+
+        for _ in 0..100 {
+            if sim.produced_parts() >= 10 {
+                break;
+            }
+            sim.step_many(100);
+            let output = sim
+                .snapshot()
+                .structures
+                .iter()
+                .find(|machine| machine.id == parts)
+                .and_then(|machine| {
+                    machine
+                        .output
+                        .iter()
+                        .find(|stack| stack.item == Item::MechanicalPart)
+                })
+                .map_or(0, |stack| stack.count);
+            if output > 0 {
+                sim.execute(GameCommand::Transfer {
+                    structure_id: parts,
+                    route: TransferRoute::OutputToPlayer,
+                    item: Item::MechanicalPart,
+                    count: output,
+                })
+                .unwrap();
+            }
+        }
+        assert_eq!(sim.produced_parts(), 10);
+        assert!(sim.snapshot().objective_complete);
+        assert_eq!(sim.material_totals(), materials_after_build);
+        sim.validate().unwrap();
+    }
+
+    #[test]
+    fn stone_mines_automatically_and_copper_plates_use_their_recipe() {
+        let mut stone = FactorySimulation::new(42);
+        stone
+            .execute(GameCommand::Move {
+                direction: Direction::North,
+            })
+            .unwrap();
+        let node = stone.resource_at(Pos::new(32, 36)).unwrap().id;
+        let miner = stone
+            .execute(GameCommand::Build {
+                kind: StructureKind::Miner,
+                position: Pos::new(32, 36),
+                direction: Direction::East,
+            })
+            .unwrap();
+        let GameEvent::Built { structure_id, .. } = miner[0] else {
+            unreachable!()
+        };
+        stone.step_many(60);
+        assert_eq!(stone.resource_quantity(node), Some(149));
+        assert_eq!(
+            stone
+                .snapshot()
+                .structures
+                .iter()
+                .find(|s| s.id == structure_id)
+                .unwrap()
+                .output[0]
+                .item,
+            Item::Stone
+        );
+
+        let mut copper = FactorySimulation::new(42);
+        copper
+            .execute(GameCommand::Move {
+                direction: Direction::West,
+            })
+            .unwrap();
+        copper
+            .execute(GameCommand::Move {
+                direction: Direction::North,
+            })
+            .unwrap();
+        for _ in 0..2 {
+            copper
+                .execute(GameCommand::Harvest {
+                    position: Pos::new(29, 34),
+                })
+                .unwrap();
+        }
+        let crafter = copper
+            .execute(GameCommand::Build {
+                kind: StructureKind::Crafter,
+                position: Pos::new(32, 33),
+                direction: Direction::East,
+            })
+            .unwrap();
+        let GameEvent::Built { structure_id, .. } = crafter[0] else {
+            unreachable!()
+        };
+        copper
+            .execute(GameCommand::Configure {
+                structure_id,
+                recipe: Recipe::CopperPlate,
+            })
+            .unwrap();
+        copper
+            .execute(GameCommand::Transfer {
+                structure_id,
+                route: TransferRoute::PlayerToInput,
+                item: Item::CopperOre,
+                count: 2,
+            })
+            .unwrap();
+        copper.step_many(40);
+        assert_eq!(
+            copper
+                .snapshot()
+                .structures
+                .iter()
+                .find(|s| s.id == structure_id)
+                .unwrap()
+                .output[0]
+                .item,
+            Item::CopperPlate
+        );
+    }
 }

@@ -12,6 +12,14 @@ cargo test --workspace
 cargo run -p factory-bevy
 ```
 
+Run commands from the repository root so the game can find `assets/sprites`. The executable also accepts `--seed 123` for a new world and `--world path/to/save.json` to load or save a specific world. With no `--world`, F5 writes `tiny-factory-save.json` in the current directory and later launches load it automatically.
+
+## Play
+
+Move with WASD. Left click a nearby deposit to harvest; press 1, 2, or 3 to select a miner, conveyor, or crafter, then left click to build. Drag with the conveyor tool to lay a line. R changes the placement direction, or rotates a selected structure. Right click a structure to inspect it. For a crafter, press E to open controls, F1–F3 to choose a recipe, Tab to choose an item, and I/U/O to insert or withdraw items. Hold Shift with a transfer key to move five. Escape closes the controls or cancels a tool. Space pauses, brackets change simulation speed, the wheel zooms, Delete removes the selected structure, and F5/F9 save or reload.
+
+The goal is ten mechanical parts. Iron plates need two iron ore each; mechanical parts need two iron plates and one wood. Trees are harvested manually, so carry wood to a mechanical-part crafter.
+
 ## Headless quick start
 
 ```sh
@@ -25,3 +33,5 @@ cargo run -p factory-cli --bin factoryctl -- scenario --file scenarios/crafting-
 ```
 
 The CLI executable is named `factoryctl`. See [docs/cli.md](docs/cli.md) for all commands and scenario semantics. [AGENTS.md](AGENTS.md) has the verification workflow; [docs/architecture.md](docs/architecture.md) describes the engine boundary.
+
+For a deterministic screenshot without a graphics window, install a current Node.js and run `node tools/render_preview.mjs world.json preview.png 32 32`. This renders the saved scene from the same sprites the frontend uses; it is a headless preview, while the running game adds UI, camera movement, and animation.
