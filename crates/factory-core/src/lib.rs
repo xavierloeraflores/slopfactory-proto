@@ -383,6 +383,9 @@ impl FactorySimulation {
         if tile.structure_id.is_some() {
             return Err(GameError::Occupied);
         }
+        if position == self.player.position {
+            return Err(GameError::Occupied);
+        }
         let resource_id = match kind {
             StructureKind::Miner => {
                 let id = tile.resource_id.ok_or(GameError::NoResource)?;
@@ -613,6 +616,234 @@ impl FactorySimulation {
         Ok(vec![GameEvent::Removed { structure_id }])
     }
 
+    /// Advance one 50 ms simulation tick. This clock is independent of Bevy.
+    /// Pipeline: extraction, crafting, belt transfers, machine exports.
+    pub fn step(&mut self) -> Vec<GameEvent> {
+        self.tick += 1;
+        let previous_parts = self.mechanical_parts_produced;
+        self.mine_tick();
+        let mut events = self.craft_tick();
+        if self.tick.is_multiple_of(5) {
+            self.transfer_belts();
+        }
+        self.export_machines();
+        if previous_parts < OBJECTIVE_PARTS && self.mechanical_parts_produced >= OBJECTIVE_PARTS {
+            events.push(GameEvent::ObjectiveCompleted);
+        }
+        events
+    }
+
+    pub fn step_many(&mut self, ticks: u64) -> Vec<GameEvent> {
+        let mut events = Vec::new();
+        for _ in 0..ticks {
+            events.extend(self.step());
+        }
+        events
+    }
+
+    fn mine_tick(&mut self) {
+        for structure in self.structures.values_mut() {
+            let StructureState::Miner {
+                progress,
+                output,
+                resource_id,
+            } = &mut structure.state
+            else {
+                continue;
+            };
+            if *output >= MINER_BUFFER_CAPACITY {
+                continue;
+            }
+            let Some(node) = self.resources.get_mut(resource_id) else {
+                continue;
+            };
+            if node.quantity == 0 {
+                continue;
+            }
+            *progress += 1;
+            if *progress == 60 {
+                node.quantity -= 1;
+                *output += 1;
+                *progress = 0;
+            }
+        }
+    }
+
+    fn craft_tick(&mut self) -> Vec<GameEvent> {
+        let mut events = Vec::new();
+        for structure in self.structures.values_mut() {
+            let StructureState::Crafter {
+                recipe: selected,
+                progress,
+                input,
+                output,
+            } = &mut structure.state
+            else {
+                continue;
+            };
+            let Some(recipe) = *selected else {
+                continue;
+            };
+            if *progress == 0 {
+                if inventory_total(output) >= CRAFTER_OUTPUT_CAPACITY {
+                    continue;
+                }
+                if recipe_inputs(recipe)
+                    .iter()
+                    .any(|(item, count)| input.get(item).copied().unwrap_or(0) < *count)
+                {
+                    continue;
+                }
+                for (item, count) in recipe_inputs(recipe) {
+                    *input.get_mut(item).expect("ingredients checked") -= count;
+                }
+            }
+            if *progress < recipe_time(recipe) {
+                *progress += 1;
+            }
+            if *progress == recipe_time(recipe) && inventory_total(output) < CRAFTER_OUTPUT_CAPACITY
+            {
+                let item = recipe_output(recipe);
+                *output.entry(item).or_default() += 1;
+                *progress = 0;
+                if item == Item::MechanicalPart {
+                    self.mechanical_parts_produced += 1;
+                }
+                events.push(GameEvent::Produced {
+                    structure_id: structure.id,
+                    item,
+                    count: 1,
+                });
+            }
+        }
+        events
+    }
+
+    fn transfer_belts(&mut self) {
+        // Read all sources and destinations before moving anything. No item can cross
+        // more than one belt during this transfer phase.
+        let mut intents = Vec::new();
+        let mut claimed = BTreeSet::new();
+        for source in self.structures.values() {
+            let StructureState::Conveyor { item: Some(item) } = source.state else {
+                continue;
+            };
+            let destination_position = source.direction.apply(source.position);
+            let Some(destination_id) = self
+                .tile(destination_position)
+                .and_then(|tile| tile.structure_id)
+            else {
+                continue;
+            };
+            if claimed.contains(&destination_id) {
+                continue;
+            }
+            let Some(destination) = self.structures.get(&destination_id) else {
+                continue;
+            };
+            let accepts = match &destination.state {
+                StructureState::Conveyor { item: None } => true,
+                StructureState::Crafter {
+                    recipe: Some(recipe),
+                    input,
+                    ..
+                } => {
+                    recipe_inputs(*recipe)
+                        .iter()
+                        .any(|(ingredient, _)| *ingredient == item)
+                        && inventory_total(input) < 24
+                }
+                _ => false,
+            };
+            if accepts {
+                claimed.insert(destination_id);
+                intents.push((source.id, destination_id, item));
+            }
+        }
+        for (source_id, destination_id, item) in intents {
+            if let Some(Structure {
+                state: StructureState::Conveyor { item: slot },
+                ..
+            }) = self.structures.get_mut(&source_id)
+            {
+                *slot = None;
+            }
+            match &mut self
+                .structures
+                .get_mut(&destination_id)
+                .expect("destination exists")
+                .state
+            {
+                StructureState::Conveyor { item: slot } => *slot = Some(item),
+                StructureState::Crafter { input, .. } => *input.entry(item).or_default() += 1,
+                _ => unreachable!("destination was accepted"),
+            }
+        }
+    }
+
+    fn export_machines(&mut self) {
+        let mut intents = Vec::new();
+        let mut claimed = BTreeSet::new();
+        for source in self.structures.values() {
+            let item = match &source.state {
+                StructureState::Miner {
+                    output,
+                    resource_id,
+                    ..
+                } if *output > 0 => self.resources.get(resource_id).map(|node| node.kind.item()),
+                StructureState::Crafter { output, .. } => output
+                    .iter()
+                    .find(|(_, count)| **count > 0)
+                    .map(|(item, _)| *item),
+                _ => None,
+            };
+            let Some(item) = item else {
+                continue;
+            };
+            let Some(destination_id) = self
+                .tile(source.direction.apply(source.position))
+                .and_then(|tile| tile.structure_id)
+            else {
+                continue;
+            };
+            if claimed.contains(&destination_id) {
+                continue;
+            }
+            if self
+                .structures
+                .get(&destination_id)
+                .is_some_and(|destination| {
+                    matches!(destination.state, StructureState::Conveyor { item: None })
+                })
+            {
+                claimed.insert(destination_id);
+                intents.push((source.id, destination_id, item));
+            }
+        }
+        for (source_id, destination_id, item) in intents {
+            match &mut self
+                .structures
+                .get_mut(&source_id)
+                .expect("source exists")
+                .state
+            {
+                StructureState::Miner { output, .. } => *output -= 1,
+                StructureState::Crafter { output, .. } => {
+                    *output.get_mut(&item).expect("item selected") -= 1
+                }
+                _ => unreachable!("source was accepted"),
+            }
+            if let StructureState::Conveyor { item: slot } = &mut self
+                .structures
+                .get_mut(&destination_id)
+                .expect("destination exists")
+                .state
+            {
+                *slot = Some(item);
+            }
+        }
+    }
+
     pub fn snapshot(&self) -> GameSnapshot {
         let mut tiles = Vec::with_capacity((WORLD_SIZE * WORLD_SIZE) as usize);
         for y in 0..WORLD_SIZE {
@@ -762,6 +993,19 @@ impl DebugWorld<'_> {
             return Err(GameError::BlockedTerrain);
         }
         self.simulation.player.position = pos;
+        Ok(())
+    }
+
+    pub fn set_belt_item(&mut self, id: StructureId, item: Option<Item>) -> Result<(), GameError> {
+        let structure = self
+            .simulation
+            .structures
+            .get_mut(&id)
+            .ok_or(GameError::NoStructure)?;
+        let StructureState::Conveyor { item: slot } = &mut structure.state else {
+            return Err(GameError::InvalidTransfer);
+        };
+        *slot = item;
         Ok(())
     }
 }
