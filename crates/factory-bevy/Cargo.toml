@@ -1,0 +1,10 @@
+[package]
+name = "factory-bevy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+bevy.workspace = true
+factory-core.workspace = true
+factory-protocol.workspace = true

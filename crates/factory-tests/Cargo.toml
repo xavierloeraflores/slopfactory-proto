@@ -1,0 +1,10 @@
+[package]
+name = "factory-tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+factory-core.workspace = true
+factory-protocol.workspace = true
+serde_json.workspace = true
