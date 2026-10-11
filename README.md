@@ -34,6 +34,7 @@ cargo run -p factory-cli --bin factoryctl -- harvest --world world.json --x 35 -
 cargo run -p factory-cli --bin factoryctl -- step --world world.json --ticks 100
 cargo run -p factory-cli --bin factoryctl -- validate --world world.json
 cargo run -p factory-cli --bin factoryctl -- scenario --file scenarios/crafting-test.json --json
+cargo run --release -p factory-cli --bin factoryctl -- bench --world world.json --ticks 1000 --samples 5 --json
 ```
 
 The CLI executable is named `factoryctl`. See [docs/cli.md](docs/cli.md) for all commands and scenario semantics. [AGENTS.md](AGENTS.md) has the verification workflow; [docs/architecture.md](docs/architecture.md) describes the engine boundary.

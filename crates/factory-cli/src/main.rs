@@ -1,3 +1,4 @@
+mod benchmark;
 mod scenario;
 
 use std::{
@@ -143,6 +144,22 @@ enum CtlCommand {
     Scenario {
         #[arg(long)]
         file: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    Bench {
+        /// Saved factory layouts to compare. Repeat --world for each layout.
+        #[arg(long, required = true)]
+        world: Vec<PathBuf>,
+        /// Label this executable build in the report (for example, a Git SHA).
+        #[arg(long)]
+        build_label: Option<String>,
+        #[arg(long, default_value_t = 1_000, value_parser = clap::value_parser!(u64).range(1..))]
+        ticks: u64,
+        #[arg(long, default_value_t = 5, value_parser = clap::value_parser!(u64).range(1..))]
+        samples: u64,
+        #[arg(long, default_value_t = 1)]
+        warmup: u64,
         #[arg(long)]
         json: bool,
     },
@@ -445,6 +462,22 @@ fn run(command: CtlCommand) -> Response {
                 .expect("report is an object")
                 .insert("ok".into(), passed);
             Ok((human, value, json))
+        }
+        CtlCommand::Bench {
+            world,
+            build_label,
+            ticks,
+            samples,
+            warmup,
+            json,
+        } => {
+            let worlds = world
+                .into_iter()
+                .map(|path| Ok((path.clone(), load(&path)?)))
+                .collect::<Result<Vec<_>, Box<dyn std::error::Error>>>()?;
+            let report = benchmark::run(worlds, build_label, ticks, samples, warmup)?;
+            let human = report.human_summary();
+            Ok((human, serde_json::to_value(report)?, json))
         }
         CtlCommand::Debug { action } => run_debug(action),
     }

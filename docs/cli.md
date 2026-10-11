@@ -22,7 +22,17 @@ factoryctl validate --world world.json
 factoryctl scenario --file scenarios/starting-world.json --json
 factoryctl scenario --file scenarios/mining-belts.json --json
 factoryctl scenario --file scenarios/crafting-test.json --json
+factoryctl bench --world sparse.json --world busy.json --ticks 1000 --samples 5 --json
 ```
+
+`bench` replays each saved factory layout from the same starting state for every run. It warms up once by default, then reports the median total time per tick, median simulation and render-snapshot time per tick, a 95th percentile across runs, ticks per second, and the final state hash. Adjust `--warmup`, `--samples`, and `--ticks` to make runs long enough for useful measurements. The command reads saves without modifying them. Use a release build for comparisons:
+
+```sh
+cargo build --release -p factory-cli
+target/release/factoryctl bench --world sparse.json --world busy.json --ticks 1000 --samples 5 --json
+```
+
+The snapshot measurement includes building the full world snapshot and its state hash. It does not measure Bevy ECS work, GPU rendering, frame rate, or the HUD. To compare compiled versions, run each executable against the same save and use `--build-label` to identify each JSON report. Compare runs on the same machine, with the same Rust build profile and tick count; use matching starting and final hashes to confirm that each replay did the same simulation work.
 
 `configure` and `transfer` require a crafter ID. IDs are assigned in build order; read them from `place --json`, `inspect`, or `summary`. Transfers support `player_to_input`, `input_to_player`, and `output_to_player`.
 
