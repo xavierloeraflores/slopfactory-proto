@@ -1,7 +1,5 @@
 use bevy::{input::mouse::MouseWheel, prelude::*, window::PrimaryWindow};
-use factory_protocol::{
-    ALL_ITEMS, Direction, GameCommand, Pos, Recipe, StructureKind, TransferRoute,
-};
+use factory_protocol::{Direction, GameCommand, Pos, StructureKind};
 
 use crate::GameState;
 
@@ -24,7 +22,7 @@ pub fn cursor(
         let width = window.resolution.width();
         let height = window.resolution.height();
         (cursor.x < 350.0 && cursor.y < 310.0)
-            || (cursor.x > width - 380.0 && cursor.y < 440.0)
+            || (cursor.x > width - 450.0 && cursor.y < if game.menu_open { 635.0 } else { 170.0 })
             || cursor.y > height - 145.0
     });
     if game.cursor_tile != tile || game.cursor_over_ui != over_ui {
@@ -114,52 +112,6 @@ pub fn keyboard(keys: Res<ButtonInput<KeyCode>>, time: Res<Time>, mut game: ResM
         }
         .into();
     }
-    if game.menu_open
-        && let Some(id) = game.selected_structure
-    {
-        let selected_recipe = if keys.just_pressed(KeyCode::F1) {
-            Some(Recipe::IronPlate)
-        } else if keys.just_pressed(KeyCode::F2) {
-            Some(Recipe::CopperPlate)
-        } else if keys.just_pressed(KeyCode::F3) {
-            Some(Recipe::MechanicalPart)
-        } else {
-            None
-        };
-        if let Some(recipe) = selected_recipe {
-            game.execute(GameCommand::Configure {
-                structure_id: id,
-                recipe,
-            });
-        }
-        if keys.just_pressed(KeyCode::Tab) {
-            game.selected_item_index = (game.selected_item_index + 1) % ALL_ITEMS.len();
-        }
-        let route = if keys.just_pressed(KeyCode::KeyI) {
-            Some(TransferRoute::PlayerToInput)
-        } else if keys.just_pressed(KeyCode::KeyU) {
-            Some(TransferRoute::InputToPlayer)
-        } else if keys.just_pressed(KeyCode::KeyO) {
-            Some(TransferRoute::OutputToPlayer)
-        } else {
-            None
-        };
-        if let Some(route) = route {
-            let count = if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
-                5
-            } else {
-                1
-            };
-            let item = ALL_ITEMS[game.selected_item_index];
-            game.execute(GameCommand::Transfer {
-                structure_id: id,
-                route,
-                item,
-                count,
-            });
-        }
-    }
-
     game.move_cooldown -= time.delta_secs();
     let directions = [
         (KeyCode::KeyW, Direction::North),
@@ -186,7 +138,11 @@ pub fn mouse(buttons: Res<ButtonInput<MouseButton>>, mut game: ResMut<GameState>
             .cursor_tile
             .and_then(|tile| game.simulation.structure_at(tile).map(|machine| machine.id));
         game.selected_structure = selected;
-        game.menu_open = false;
+        game.menu_open = selected.is_some_and(|id| {
+            game.simulation
+                .structure(id)
+                .is_some_and(|machine| machine.kind() == StructureKind::Crafter)
+        });
         game.status = game.selected_structure.map_or_else(
             || "No structure at cursor".into(),
             |id| format!("Inspecting structure #{id}"),
