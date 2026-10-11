@@ -30,7 +30,6 @@ struct GameState {
     direction: Direction,
     selected_structure: Option<StructureId>,
     menu_open: bool,
-    selected_item_index: usize,
     cursor_tile: Option<Pos>,
     cursor_over_ui: bool,
     last_drag_tile: Option<Pos>,
@@ -155,7 +154,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let initial_status = if simulation.produced_parts() >= 10 {
         "Objective complete! The factory keeps running."
     } else {
-        "WASD to move. Right click a crafter, then E to interact."
+        "Right-click a crafter to configure recipes and move items."
     };
     App::new()
         .add_plugins(
@@ -186,7 +185,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             direction: Direction::North,
             selected_structure: None,
             menu_open: false,
-            selected_item_index: 0,
             cursor_tile: None,
             cursor_over_ui: false,
             last_drag_tile: None,
@@ -200,6 +198,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             (
                 input::cursor,
                 input::keyboard,
+                ui::actions,
                 input::mouse,
                 input::zoom,
                 advance_simulation,
